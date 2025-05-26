@@ -1,0 +1,52 @@
+<?xml version="1.0"?>
+<robot>
+
+  <!-- ros_control plugin -->
+  <gazebo>
+    <plugin name="gazebo_ros_control" filename="libgazebo_ros_control.so">
+      <robotNamespace>/myrobot</robotNamespace>
+      <robotSimType>gazebo_ros_control/DefaultRobotHWSim</robotSimType>
+    </plugin>
+  </gazebo>
+
+  <!-- Link0 -->
+  <gazebo reference="link0">
+    <material>Gazebo/Orange</material>
+    <selfCollide>true</selfCollide><!--default false,if set faulse,model can go through itself-->
+  </gazebo>
+
+  <!-- Link1 -->
+  <gazebo reference="link1">
+    <mu1>1</mu1>
+    <mu2>1</mu2>
+    <material>Gazebo/Black</material>
+    <selfCollide>true</selfCollide>
+  </gazebo>
+
+  <!-- Link2 -->
+  <gazebo reference="link2">
+    <mu1>1</mu1>
+    <mu2>1</mu2>
+    <material>Gazebo/Orange</material>
+    <selfCollide>true</selfCollide>
+  </gazebo>
+
+  <!-- Link3 -->
+  <gazebo reference="link3">
+    <mu1>1</mu1>
+    <mu2>1</mu2>
+    <material>Gazebo/Black</material>
+    <selfCollide>true</selfCollide>
+  </gazebo>
+  <!-- Link4 -->
+  <gazebo reference="link4">
+    <mu1>1</mu1>
+    <mu2>1</mu2>
+    <material>Gazebo/Yellow</material>
+    <selfCollide>true</selfCollide>
+    <!-- <fdir1>"0 -1 0</fdir1> -->
+  </gazebo>
+
+  
+
+</robot>

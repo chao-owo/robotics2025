@@ -1,0 +1,17 @@
+myrobot:
+  # Publish all joint states(sensor,encoder,IMU data use this...) -----------------------------------
+  
+  myrobot_sensor_encoder_data:
+    type: joint_state_controller/JointStateController
+    publish_rate: 50  
+  #ignore the weird name "controller" above
+
+
+  four_joints_position_controllers:
+    type: "position_controllers/JointGroupPositionController"
+    joints:
+      - joint1
+      - joint2
+      - joint3
+      - joint4
+

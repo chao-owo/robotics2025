@@ -1,0 +1,8 @@
+prefix=/home/chao/robotics2025/devel
+
+Name: cam
+Description: Description of cam
+Version: 0.0.0
+Cflags: 
+Libs: -L${prefix}/lib 
+Requires: 

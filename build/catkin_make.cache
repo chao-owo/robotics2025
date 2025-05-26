@@ -1,0 +1,2 @@
+cam:myplan:myrobot/myrobot/myrobot_control:myrobot/myrobot/myrobot_description:myrobot/myrobot/myrobot_gazebo:practice:voicegpt_ros
+-DCATKIN_DEVEL_PREFIX=/home/chao/robotics25/robotics2025/devel -DCMAKE_INSTALL_PREFIX=/home/chao/robotics25/robotics2025/install -G Unix Makefiles

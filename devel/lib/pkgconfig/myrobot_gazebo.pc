@@ -1,0 +1,8 @@
+prefix=/home/chao/robotics2025/devel
+
+Name: myrobot_gazebo
+Description: Description of myrobot_gazebo
+Version: 0.0.0
+Cflags: 
+Libs: -L${prefix}/lib 
+Requires: 

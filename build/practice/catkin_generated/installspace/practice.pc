@@ -1,0 +1,8 @@
+prefix=/home/chao/robotics2025/install
+
+Name: practice
+Description: Description of practice
+Version: 0.0.0
+Cflags: 
+Libs: -L${prefix}/lib 
+Requires: 
