@@ -10,6 +10,7 @@ from moveit_commander.conversions import pose_to_list
 import numpy as np
 from numpy import sin, cos
 from std_msgs.msg import Float64MultiArray
+from std_msgs.msg import Bool  # Added for magnet control
 
 def all_close(goal, actual, tolerance):
 
@@ -41,28 +42,22 @@ class MoveGroupPythonIntefaceTutorial(object):
     group_name = "ldsc_arm"
     move_group = moveit_commander.MoveGroupCommander(group_name)
 
-    #display_trajectory_publisher = rospy.Publisher('/move_group/display_planned_path',
-    #                                                moveit_msgs.msg.DisplayTrajectory,
-    #                                                queue_size=20)
     display_trajectory_publisher = rospy.Publisher('/real_robot_arm_joint',
                                                    Float64MultiArray,
                                                    queue_size=10)
-
+    
+    # Add magnet control publisher
+    magnet_publisher = rospy.Publisher('/SetEndEffector', Bool, queue_size=10)
 
     planning_frame = move_group.get_planning_frame()
-    # print "============ Planning frame: %s" % planning_frame
-
-    # move_group.set_workspace([-0.2984,-0.2984,0.0,0.2984,0.2984,0.4404])
-
     group_names = robot.get_group_names()
-
 
     self.robot = robot
     self.scene = scene
     self.move_group = move_group
     self.display_trajectory_publisher = display_trajectory_publisher
+    self.magnet_publisher = magnet_publisher  # FIXED: Properly assign to self
     self.planning_frame = planning_frame
-    
     self.group_names = group_names
 
     joint_angles = move_group.get_current_joint_values()
@@ -70,27 +65,53 @@ class MoveGroupPythonIntefaceTutorial(object):
     joint_msg = Float64MultiArray()
     joint_msg.data = joint_angles
     display_trajectory_publisher.publish(joint_msg)
+
+  def set_magnet(self, state):
+    """
+    Control the electromagnet
+    Args:
+        state (bool): True to turn on magnet, False to turn off
+    """
+    magnet_msg = Bool()
+    magnet_msg.data = state
+    self.magnet_publisher.publish(magnet_msg)
+    rospy.sleep(0.1)  # Small delay to ensure message is sent
+    print(f"Magnet {'ON' if state else 'OFF'}")
     
-  def go_to_joint_state(self):
+  def go_to_joint_state(self, auto_magnet=True):
     
     move_group = self.move_group
     joint_angles = self.joint_angles
 
     joint_goal = move_group.get_current_joint_values()
 
-    joint_goal[0] = joint_angles[0].item()
-    joint_goal[1] = joint_angles[1].item()
-    joint_goal[2] = joint_angles[2].item()
-    joint_goal[3] = joint_angles[3].item()
+    # FIXED: Handle both numpy array and list cases
+    if hasattr(joint_angles[0], 'item'):
+        joint_goal[0] = joint_angles[0].item()
+        joint_goal[1] = joint_angles[1].item()
+        joint_goal[2] = joint_angles[2].item()
+        joint_goal[3] = joint_angles[3].item()
+    else:
+        joint_goal[0] = joint_angles[0]
+        joint_goal[1] = joint_angles[1]
+        joint_goal[2] = joint_angles[2]
+        joint_goal[3] = joint_angles[3]
 
     move_group.go(joint_goal, wait=True)
-
     move_group.stop()
 
+    # Check if we reached the goal
     current_joints = move_group.get_current_joint_values()
+    goal_reached = all_close(joint_goal, current_joints, 0.01)
+    
+    if goal_reached and auto_magnet:
+        print("Goal reached! Turning on magnet...")
+        rospy.sleep(0.5)  # Wait a bit for arm to stabilize
+        self.set_magnet(True)
+    
+    # Display current pose information
     current_pose = self.move_group.get_current_pose('link5').pose
     print ("current pose:")
-    # print (current_pose.position) 
     print ("x: %.5f" %current_pose.position.x)
     print ("y: %.5f" %current_pose.position.y)
     print ("z: %.5f" %current_pose.position.z)
@@ -100,7 +121,8 @@ class MoveGroupPythonIntefaceTutorial(object):
     print ("pit: %.5f" %current_rpy[1])
     print ("yaw: %.5f" %current_rpy[2])
     print ("")
-    return all_close(joint_goal, current_joints, 0.01)
+    
+    return goal_reached
 
 
 def Your_IK(x, y, z, p): 
@@ -206,38 +228,59 @@ def Your_IK(x, y, z, p):
         joint_angle = joint_angle + K * np.matmul(J_hash, (Xd-Xe))
         joint_angle[3] = p - (joint_angle[1]+joint_angle[2])
         
-
+        
         
         
     return joint_angle
 
 def main():
-  try:
-    path_object = MoveGroupPythonIntefaceTutorial()
-    print("ctrl + z to close")
-    while not rospy.is_shutdown():
-  
-        try:
-          x_input=float(input("x:  "))
-          y_input=float(input("y:  "))
-          z_input=float(input("z:  "))
-          q_input=float(input("q:  "))
+    try:
+        path_object = MoveGroupPythonIntefaceTutorial()
+        print("ctrl + z to close")
+        print("Commands: 'on' = magnet on, 'off' = magnet off, or enter x,y,z,q coordinates")
+        
+        while not rospy.is_shutdown():
+            try:
+                user_input = input("Enter command: ").strip().lower()
+                
+                if user_input == "on":
+                    path_object.set_magnet(True)
+                elif user_input == "off":
+                    path_object.set_magnet(False)
+                else:
+                    # Parse as position input or ask for coordinates
+                    try:
+                        # Try to parse as "x y z q" format
+                        values = user_input.split()
+                        if len(values) == 4:
+                            x_input = float(values[0])
+                            y_input = float(values[1])
+                            z_input = float(values[2])
+                            q_input = float(values[3])
+                        else:
+                            raise ValueError("Need individual inputs")
+                    except:
+                        # Ask for individual inputs
+                        x_input = float(input("x: "))
+                        y_input = float(input("y: "))
+                        z_input = float(input("z: "))
+                        q_input = float(input("q: "))
+                    
+                    path_object.joint_angles = Your_IK(x_input, y_input, z_input, q_input)
+                    # This will automatically turn on magnet after reaching goal
+                    path_object.go_to_joint_state()
+                    
+            except Exception as e:
+                print(f"Error: {e}")
+                '''go back to home if weird input'''
+                path_object.joint_angles = [0, -pi/2, pi/2, 0]
+                path_object.go_to_joint_state(auto_magnet=False)  # Don't turn on magnet when going home
+                path_object.set_magnet(False)  # Turn off magnet
 
-          path_object.joint_angles = Your_IK(x_input,y_input,z_input,q_input)
-          '''
-          You just need to solve IK of a point, path planning will automatically be taken.  
-          '''
-          path_object.go_to_joint_state()
-
-        except:
-          '''go back to home if weird input'''
-          path_object.joint_angles = [0,-pi/2,pi/2,0]
-          path_object.go_to_joint_state()
-
-  except rospy.ROSInterruptException:
-    return
-  except KeyboardInterrupt:
-    return
+    except rospy.ROSInterruptException:
+        return
+    except KeyboardInterrupt:
+        return
 
 if __name__ == '__main__':
   main()
