@@ -125,12 +125,28 @@ class MoveGroupPythonIntefaceTutorial(object):
     return goal_reached
 
 
-def Your_IK(x, y, z, p): 
+def Your_IK(x, y, z, p = pi/2): 
     Xd = np.array([x, y, z], ndmin=2).T
-    K, error_margin = 0.05, 0.001
-
-    joint_angle = np.array([0.5, 1.14, 0.93, 0.4], ndmin=2).T
-    while True:
+    
+    # Increase step size for faster convergence
+    K = 0.15  # Increased from 0.05
+    
+    # Slightly relax error margin for faster convergence
+    error_margin = 0.0015  # Increased slightly from 0.001
+    
+    # Better initial guess for faster convergence
+    # Use previous solution as initial guess if available
+    if hasattr(Your_IK, "last_solution") and Your_IK.last_solution is not None:
+        joint_angle = Your_IK.last_solution.copy()
+    else:
+        joint_angle = np.array([0.5, 1.14, 0.93, 0.4], ndmin=2).T
+    
+    # Add maximum iterations to prevent infinite loops
+    max_iterations = 50
+    iteration = 0
+    
+    while iteration < max_iterations:
+        iteration += 1
         j1, j2, j3, j4 = joint_angle.T[0]
         # kinematics
         x_ = (
@@ -165,13 +181,22 @@ def Your_IK(x, y, z, p):
 
         Xe = np.array([x_, y_, z_], ndmin=2).T
 
-        print("Xd:", Xd)
-        print("q:", joint_angle.T[0], "\nXe:", Xe)
+        # Reduce verbosity - only print every 10th iteration
+        if iteration % 10 == 0:
+            print("Target:", Xd.T[0])
+            print("Current Joint Angles:", joint_angle.T[0])
+            print("Current End Effector Position:", Xe.T[0])
+            print("Iteration:", iteration)
 
         dist = np.linalg.norm(Xd-Xe)
-        print("d:", dist)
+        
+        # Only print distance occasionally
+        if iteration % 10 == 0:
+            print("Distance to target:", dist)
+            
         if dist < error_margin:
             break
+            
         Ja = [
              [
              (6 * sin(j2 + j3 - p) * (cos(j2) * cos(j3) * sin(j1) - sin(j1) * sin(j2) * sin(j3))) / 125
@@ -222,16 +247,34 @@ def Your_IK(x, y, z, p):
                 ]
                 ]
 
-    
         Ja = np.array(Ja)
-        J_hash = np.matmul(Ja.T, np.linalg.inv(np.matmul(Ja, (Ja.T))))
-        joint_angle = joint_angle + K * np.matmul(J_hash, (Xd-Xe))
+        
+        # Use a more numerically stable pseudoinverse method
+        # Add small regularization term for stability
+        lambda_factor = 1e-6
+        J_hash = np.matmul(Ja.T, np.linalg.inv(np.matmul(Ja, Ja.T) + lambda_factor * np.eye(3)))
+        
+        # Compute the update step
+        update = K * np.matmul(J_hash, (Xd-Xe))
+        
+        # Add momentum term to speed up convergence
+        if iteration > 1 and hasattr(Your_IK, "last_update"):
+            momentum = 0.3  # Momentum coefficient
+            update = update + momentum * Your_IK.last_update
+        
+        Your_IK.last_update = update.copy()
+        
+        # Update joint angles
+        joint_angle = joint_angle + update
         joint_angle[3] = p - (joint_angle[1]+joint_angle[2])
-        
-        
-        
-        
-    return joint_angle
+    
+    # Store solution for next call
+    Your_IK.last_solution = joint_angle.copy()
+    
+    # FIX: Convert numpy arrays to plain Python floats
+    result = joint_angle.flatten().tolist()
+    print("Final joint angles:", result)
+    return result
 
 def main():
     try:
