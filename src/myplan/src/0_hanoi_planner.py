@@ -12,13 +12,10 @@ from std_msgs.msg import String
 from math import atan2, acos, asin, sqrt, sin, cos, pi
 import rospkg 
 import time
-
-
-
+import speech_recognition as sr
 
 from geometry_msgs.msg import PoseStamped
 import cv2
-
 
 from datetime import datetime
 
@@ -76,14 +73,7 @@ tower_disks = {
     'B': [],  # Tower B (center)
     'C': []   # Tower C (right)
 }
-'''
-# Tower coordinates
-tower_coords = {
-    'A': (p_Tower_x, p_Tower_y),    # Tower A (left)
-    'B': (p_Tower_x, 0),            # Tower B (center)
-    'C': (p_Tower_x, -p_Tower_y)    # Tower C (right)
-}
-'''
+
 def all_close(goal, actual, tolerance):
     all_equal = True
     if type(goal) is list:
@@ -509,7 +499,7 @@ def spawn_hanoi_towers(path_object, vo_list):
         tower_name = mesh_names[i]
         path_object.add_mesh(tower_name, mesh_pose, MESH_FILE_PATH[i], (.00095, .00095, .00095))
         print(f"Added {tower_name} at position ({x}, {y}, {z})")
-
+    '''
     # Add two tall tower-like boxes as obstacles (unchanged)
     tall_box_size = (0.010, 0.010, 0.4)  # width, depth, height
 
@@ -528,6 +518,8 @@ def spawn_hanoi_towers(path_object, vo_list):
 
         path_object.add_box(box_names[i], box_pose, tall_box_size)
         print(f"Added box {box_names[i]} at position ({x}, {y}, {z})")
+    '''
+
 
 
 def solve(path_object, vo_list):
@@ -549,6 +541,8 @@ def solve(path_object, vo_list):
         'C': tower_coords['C'][1]   # Get y-coordinate for Tower C
     }
     
+    move_count = 0
+    
     def safe_ik_move(x, y, z, desc=""):
         """Safe inverse kinematics move with error handling"""
         try:
@@ -561,8 +555,9 @@ def solve(path_object, vo_list):
         except Exception as e:
             print(f"[ERROR] Move failed at {desc}: {e}")
             return False
-    
+
     def move_disk(from_tower, to_tower, disk_name, target_height):
+        
         """Move a disk from one tower to another at specified height"""
         from_y = tower_positions[from_tower]
         to_y = tower_positions[to_tower]
@@ -600,15 +595,15 @@ def solve(path_object, vo_list):
             print(f"Lowering to place {disk_name} on tower {to_tower} at height {target_height}")
             if not safe_ik_move(0.25, to_y, target_height, f"place {disk_name} on tower {to_tower}"):
                 raise Exception(f"Can't descend to tower {to_tower}")
-            
-            # Detach disk
-            path_object.detach_mesh(disk_name, "link5")
-            print(f"Detached {disk_name}")
-            
-            # Lift to safe height
-            print(f"Lifting from tower {to_tower}")
-            if not safe_ik_move(0.25, to_y, safe_height, f"lift from tower {to_tower}"):
-                raise Exception(f"Can't lift from tower {to_tower}")
+            if move_count == 0:
+                # Detach disk
+                path_object.detach_mesh(disk_name, "link5")
+                print(f"Detached {disk_name}")
+                
+                # Lift to safe height
+                print(f"Lifting from tower {to_tower}")
+                if not safe_ik_move(0.25, to_y, safe_height, f"lift from tower {to_tower}"):
+                    raise Exception(f"Can't lift from tower {to_tower}")
             
             return True
             
@@ -621,22 +616,18 @@ def solve(path_object, vo_list):
         
         # Step 1: Move disk B from tower B to tower A (z = 0.05)
         print("Step 1: Moving disk B on top of A")
-        success = move_disk('B', 'A', 'B', 0.05)
-        
+        success = move_disk('B', 'A', 'B', 0.04)
+        move_count = 1
         if not success:
             raise Exception("Failed to move disk B to tower A")
         
         # Step 2: Move disk C from tower C to tower A on top of B (z = 0.075)
         print("Step 2: Moving disk C on top of B")
-        success = move_disk('C', 'A', 'C', 0.075)
+        success = move_disk('C', 'A', 'C', 0.055)
         
         if not success:
             raise Exception("Failed to move disk C to tower A")
         
-        # Return to original pose
-        print("Returning to original pose")
-        path_object.joint_angles = [0.06161233, 0.56530055, 1.67981925, -0.67432347, 1]
-        path_object.go_to_joint_state()
         
         print("Hanoi stacking completed successfully!")
         return vo_list[0]
@@ -647,7 +638,8 @@ def solve(path_object, vo_list):
         path_object.joint_angles = [0, -pi/2, pi/2, 0]
         path_object.go_to_joint_state()
         return None
-# modified
+
+# needed modify
 def voice_callback(msg):
     global global_path_object
     case_map = {
@@ -671,10 +663,1202 @@ def voice_callback(msg):
     else:
         print(f"No matching case function for command: {key}")
 
-def hanoi_tower(path_object, n_disks=3):
-    pass
+def save_voice_command(file_path="/home/cynthia/Robotics/voice_command.txt", language="zh-TW"):
+    recognizer = sr.Recognizer()
+    microphone = sr.Microphone()
 
+    print("🎤 等待語音輸入中（將於 1 秒後開始錄音）...")
+    time.sleep(1)
 
+    with microphone as source:
+        recognizer.adjust_for_ambient_noise(source)
+        print("📢 請開始說話...")
+        audio = recognizer.listen(source)
+        print("🧠 辨識中...")
+
+    try:
+        recognized_text = recognizer.recognize_google(audio, language=language)
+        print(f"✅ 認識結果：{recognized_text}")
+
+        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+        with open(file_path, "w", encoding="utf-8") as f:
+            f.write(recognized_text + "\n")
+
+        print(f"💾 成功寫入：{file_path}")
+        return recognized_text
+
+    except sr.UnknownValueError:
+        print("❌ 無法辨識語音")
+        return None
+    except sr.RequestError as e:
+        print(f"❌ 語音辨識請求失敗: {e}")
+        return None
+
+def read_voice_commands(path="/home/cynthia/Robotics/voice_command.txt"):
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            return [line.strip() for line in f if line.strip()]
+    except Exception as e:
+        print(f"❌ 語音指令讀取失敗: {e}")
+        return []
+
+def parse_instruction(instruction):
+    """
+    支援格式：
+    - 從[位置]移到[位置]
+    - 從[位置]移動到[位置]
+    - 從[位置]搬到[位置]
+    - 從[位置]到[位置]
+    - 到[位置]
+    - 移到[位置]
+    - 搬到[位置]
+    - 終點位置為[位置]
+    - 位置可用 a/A/左、b/B/中、c/C/右 表示
+    回傳 tuple: (src, dst)，若只有終點，src 回傳 None
+    """
+    import re
+
+    pos_map = {
+        'a': 'A', 'A': 'A', '左': 'A', '左邊': 'A',
+        'b': 'B', 'B': 'B', '中': 'B', '中間': 'B',
+        'c': 'C', 'C': 'C', '右': 'C', '右邊': 'C',
+    }
+
+    instr = instruction.strip().replace(" ", "")
+
+    # 雙位置形式
+    patterns = [
+        r"從(.*?)搬到(.*?)",
+        r"從(.*?)移動到(.*?)",
+        r"從(.*?)移到(.*?)",
+        r"從(.*?)到(.*?)",
+    ]
+
+    for pat in patterns:
+        m = re.match(pat, instr)
+        if m:
+            src = pos_map.get(m.group(1), None)
+            dst = pos_map.get(m.group(2), None)
+            if src and dst:
+                return src, dst
+            else:
+                raise ValueError(f"❌ 無法解析位置：{m.group(1)} 或 {m.group(2)}")
+
+    # 單位置形式（只指定目標）
+    single_patterns = [
+        r"到(.*?)",
+        r"移到(.*?)",
+        r"搬到(.*?)",
+        r"終點位置為(.*?)"
+    ]
+
+    for pat in single_patterns:
+        m = re.match(pat, instr)
+        if m:
+            dst = pos_map.get(m.group(1), None)
+            if dst:
+                return None, dst
+            else:
+                raise ValueError(f"❌ 無法解析目標位置：{m.group(1)}")
+
+    raise ValueError(f"❌ 無法解析語音指令格式：{instruction}")
+def case_1(path_object):
+    # 1-2
+    print("Step 1: Moving C")
+    path_object.joint_angles = Your_IK(0.25, 0.15, 0.06)
+    path_object.go_to_joint_state()
+
+    EefState = 1  # Turn magnet on
+    pub_EefState.publish(Bool(EefState))
+    rospy.sleep(0.5)  # Wait for magnet to activate
+    # For visualization only
+    try:
+        path_object.attach_mesh("C", "link5")
+        print("Mesh C attached to end effector")
+    except Exception as e:
+        print(f"Note: Visualization failed but continuing: {e}")
+    
+    path_object.joint_angles = Your_IK(0.25, 0, 0.025)
+    path_object.go_to_joint_state()
+
+    EefState = 0  # Turn magnet off
+    pub_EefState.publish(Bool(EefState))
+    rospy.sleep(0.2)  # Wait for magnet to deactivate
+    # For visualization only
+    try:
+        path_object.detach_mesh("C", "link5")
+    except Exception as e:
+        print(f"Note: Visualization failed but continuing: {e}")
+
+    print("Step 2: Moving B")
+    path_object.joint_angles = Your_IK(0.25, 0.15, 0.04)
+    path_object.go_to_joint_state()
+
+    EefState = 1  # Turn magnet on
+    pub_EefState.publish(Bool(EefState))
+    rospy.sleep(0.2)  # Wait for magnet to activate
+    # For visualization only
+    try:
+        path_object.attach_mesh("B", "link5")
+        print("Mesh B attached to end effector")
+    except Exception as e:
+        print(f"Note: Visualization failed but continuing: {e}")
+    
+    path_object.joint_angles = Your_IK(0.25, -0.15, 0.025)
+    path_object.go_to_joint_state()
+
+    EefState = 0  # Turn magnet off
+    pub_EefState.publish(Bool(EefState))
+    rospy.sleep(0.2)  # Wait for magnet to deactivate
+    # For visualization only
+    try:
+        path_object.detach_mesh("B", "link5")
+    except Exception as e:
+        print(f"Note: Visualization failed but continuing: {e}")
+    
+    print("Step 3: Moving C")
+    path_object.joint_angles = Your_IK(0.25, 0, 0.025)
+    path_object.go_to_joint_state()
+
+    EefState = 1  # Turn magnet on
+    pub_EefState.publish(Bool(EefState))
+    rospy.sleep(0.2)  # Wait for magnet to activate
+    # For visualization only
+    try:
+        path_object.attach_mesh("C", "link5")
+        print("Mesh C attached to end effector")
+    except Exception as e:
+        print(f"Note: Visualization failed but continuing: {e}")
+    
+    path_object.joint_angles = Your_IK(0.25, -0.15, 0.05)
+    path_object.go_to_joint_state()
+
+    EefState = 0  # Turn magnet off
+    pub_EefState.publish(Bool(EefState))
+    rospy.sleep(0.2)  # Wait for magnet to deactivate
+    # For visualization only
+    try:
+        path_object.detach_mesh("C", "link5")
+    except Exception as e:
+        print(f"Note: Visualization failed but continuing: {e}")
+
+    print("Step 4: Moving A")
+    path_object.joint_angles = Your_IK(0.25, 0.15, 0.025)
+    path_object.go_to_joint_state()
+
+    EefState = 1  # Turn magnet on
+    pub_EefState.publish(Bool(EefState))
+    rospy.sleep(0.2)  # Wait for magnet to activate
+    # For visualization only
+    try:
+        path_object.attach_mesh("A", "link5")
+        print("Mesh A attached to end effector")
+    except Exception as e:
+        print(f"Note: Visualization failed but continuing: {e}")
+    
+    path_object.joint_angles = Your_IK(0.25, 0, 0.025)
+    path_object.go_to_joint_state()
+
+    EefState = 0  # Turn magnet off
+    pub_EefState.publish(Bool(EefState))
+    rospy.sleep(0.2)  # Wait for magnet to deactivate
+    # For visualization only
+    try:
+        path_object.detach_mesh("A", "link5")
+    except Exception as e:
+        print(f"Note: Visualization failed but continuing: {e}")
+    
+    print("Step 5: Moving C")
+    path_object.joint_angles = Your_IK(0.25, -0.15, 0.05)
+    path_object.go_to_joint_state()
+
+    EefState = 1  # Turn magnet on
+    pub_EefState.publish(Bool(EefState))
+    rospy.sleep(0.2)  # Wait for magnet to activate
+    # For visualization only
+    try:
+        path_object.attach_mesh("C", "link5")
+        print("Mesh C attached to end effector")
+    except Exception as e:
+        print(f"Note: Visualization failed but continuing: {e}")
+    
+    path_object.joint_angles = Your_IK(0.25, 0.15, 0.025)
+    path_object.go_to_joint_state()
+
+    EefState = 0  # Turn magnet off
+    pub_EefState.publish(Bool(EefState))
+    rospy.sleep(0.2)  # Wait for magnet to deactivate
+    # For visualization only
+    try:
+        path_object.detach_mesh("C", "link5")
+    except Exception as e:
+        print(f"Note: Visualization failed but continuing: {e}")
+
+    print("Step 6: Moving B")
+    path_object.joint_angles = Your_IK(0.25, -0.15, 0.025)
+    path_object.go_to_joint_state()
+
+    EefState = 1  # Turn magnet on
+    pub_EefState.publish(Bool(EefState))
+    rospy.sleep(0.2)  # Wait for magnet to activate
+    # For visualization only
+    try:
+        path_object.attach_mesh("B", "link5")
+        print("Mesh B attached to end effector")
+    except Exception as e:
+        print(f"Note: Visualization failed but continuing: {e}")
+    
+    path_object.joint_angles = Your_IK(0.25, 0, 0.05)
+    path_object.go_to_joint_state()
+
+    EefState = 0  # Turn magnet off
+    pub_EefState.publish(Bool(EefState))
+    rospy.sleep(0.2)  # Wait for magnet to deactivate
+    # For visualization only
+    try:
+        path_object.detach_mesh("B", "link5")
+    except Exception as e:
+        print(f"Note: Visualization failed but continuing: {e}")
+    
+    print("Step 7: Moving C")
+    path_object.joint_angles = Your_IK(0.25, 0.15, 0.025)
+    path_object.go_to_joint_state()
+
+    EefState = 1  # Turn magnet on
+    pub_EefState.publish(Bool(EefState))
+    rospy.sleep(0.2)  # Wait for magnet to activate
+    # For visualization only
+    try:
+        path_object.attach_mesh("C", "link5")
+        print("Mesh C attached to end effector")
+    except Exception as e:
+        print(f"Note: Visualization failed but continuing: {e}")
+    
+    path_object.joint_angles = Your_IK(0.25, 0, 0.075)
+    path_object.go_to_joint_state()
+
+    EefState = 0  # Turn magnet off
+    pub_EefState.publish(Bool(EefState))
+    rospy.sleep(0.2)  # Wait for magnet to deactivate
+    # For visualization only
+    try:
+        path_object.detach_mesh("C", "link5")
+    except Exception as e:
+        print(f"Note: Visualization failed but continuing: {e}")
+
+def case_2(path_object):
+    # 1-3
+    print("Step 1: Moving C")
+    path_object.joint_angles = Your_IK(0.25, 0.15, 0.06)
+    path_object.go_to_joint_state()
+
+    EefState = 1  # Turn magnet on
+    pub_EefState.publish(Bool(EefState))
+    rospy.sleep(0.5)  # Wait for magnet to activate
+    # For visualization only
+    try:
+        path_object.attach_mesh("C", "link5")
+        print("Mesh C attached to end effector")
+    except Exception as e:
+        print(f"Note: Visualization failed but continuing: {e}")
+
+    path_object.joint_angles = Your_IK(0.25, -0.15, 0.025)
+    path_object.go_to_joint_state()
+
+    EefState = 0  # Turn magnet off
+    pub_EefState.publish(Bool(EefState))
+    rospy.sleep(0.2)  # Wait for magnet to deactivate
+    # For visualization only
+    try:
+        path_object.detach_mesh("C", "link5")
+    except Exception as e:
+        print(f"Note: Visualization failed but continuing: {e}")
+
+    print("Step 2: Moving B")
+    path_object.joint_angles = Your_IK(0.25, 0.15, 0.04)
+    path_object.go_to_joint_state()
+
+    EefState = 1  # Turn magnet on
+    pub_EefState.publish(Bool(EefState))
+    rospy.sleep(0.2)  # Wait for magnet to activate
+    # For visualization only
+    try:
+        path_object.attach_mesh("B", "link5")
+        print("Mesh B attached to end effector")
+    except Exception as e:
+        print(f"Note: Visualization failed but continuing: {e}")
+
+    path_object.joint_angles = Your_IK(0.25, 0.0, 0.025)
+    path_object.go_to_joint_state()
+
+    EefState = 0  # Turn magnet off
+    pub_EefState.publish(Bool(EefState))
+    rospy.sleep(0.2)  # Wait for magnet to deactivate
+    # For visualization only
+    try:
+        path_object.detach_mesh("B", "link5")
+    except Exception as e:
+        print(f"Note: Visualization failed but continuing: {e}")
+    
+    print("Step 3: Moving C")
+    path_object.joint_angles = Your_IK(0.25, -0.15, 0.025)
+    path_object.go_to_joint_state()
+
+    EefState = 1  # Turn magnet on
+    pub_EefState.publish(Bool(EefState))
+    rospy.sleep(0.2)  # Wait for magnet to activate
+    # For visualization only
+    try:
+        path_object.attach_mesh("C", "link5")
+        print("Mesh C attached to end effector")
+    except Exception as e:
+        print(f"Note: Visualization failed but continuing: {e}")
+
+    path_object.joint_angles = Your_IK(0.25, 0.0, 0.05)
+    path_object.go_to_joint_state()
+
+    EefState = 0  # Turn magnet off
+    pub_EefState.publish(Bool(EefState))
+    rospy.sleep(0.2)  # Wait for magnet to deactivate
+    # For visualization only
+    try:
+        path_object.detach_mesh("C", "link5")
+    except Exception as e:
+        print(f"Note: Visualization failed but continuing: {e}")
+
+    print("Step 4: Moving A")
+    path_object.joint_angles = Your_IK(0.25, 0.15, 0.025)
+    path_object.go_to_joint_state()
+
+    EefState = 1  # Turn magnet on
+    pub_EefState.publish(Bool(EefState))
+    rospy.sleep(0.2)  # Wait for magnet to activate
+    # For visualization only
+    try:
+        path_object.attach_mesh("A", "link5")
+        print("Mesh A attached to end effector")
+    except Exception as e:
+        print(f"Note: Visualization failed but continuing: {e}")
+
+    path_object.joint_angles = Your_IK(0.25, -0.15, 0.025)
+    path_object.go_to_joint_state()
+
+    EefState = 0  # Turn magnet off
+    pub_EefState.publish(Bool(EefState))
+    rospy.sleep(0.2)  # Wait for magnet to deactivate
+    # For visualization only
+    try:
+        path_object.detach_mesh("A", "link5")
+    except Exception as e:
+        print(f"Note: Visualization failed but continuing: {e}")
+    print("Step 5: Moving C")
+    path_object.joint_angles = Your_IK(0.25, 0.0, 0.05)
+    path_object.go_to_joint_state()
+
+    EefState = 1  # Turn magnet on
+    pub_EefState.publish(Bool(EefState))
+    rospy.sleep(0.2)  # Wait for magnet to activate
+    # For visualization only
+    try:
+        path_object.attach_mesh("C", "link5")
+        print("Mesh C attached to end effector")
+    except Exception as e:
+        print(f"Note: Visualization failed but continuing: {e}")
+
+    path_object.joint_angles = Your_IK(0.25, 0.15, 0.025)
+    path_object.go_to_joint_state()
+
+    EefState = 0  # Turn magnet off
+    pub_EefState.publish(Bool(EefState))
+    rospy.sleep(0.2)  # Wait for magnet to deactivate
+    # For visualization only
+    try:
+        path_object.detach_mesh("C", "link5")
+    except Exception as e:
+        print(f"Note: Visualization failed but continuing: {e}")
+
+    print("Step 6: Moving B")
+    path_object.joint_angles = Your_IK(0.25, 0.0, 0.025)
+    path_object.go_to_joint_state()
+
+    EefState = 1  # Turn magnet on
+    pub_EefState.publish(Bool(EefState))
+    rospy.sleep(0.2)  # Wait for magnet to activate
+    # For visualization only
+    try:
+        path_object.attach_mesh("B", "link5")
+        print("Mesh B attached to end effector")
+    except Exception as e:
+        print(f"Note: Visualization failed but continuing: {e}")
+
+    path_object.joint_angles = Your_IK(0.25, -0.15, 0.05)
+    path_object.go_to_joint_state()
+
+    EefState = 0  # Turn magnet off
+    pub_EefState.publish(Bool(EefState))
+    rospy.sleep(0.2)  # Wait for magnet to deactivate
+    # For visualization only
+    try:
+        path_object.detach_mesh("B", "link5")
+    except Exception as e:
+        print(f"Note: Visualization failed but continuing: {e}")
+    print("Step 7: Moving C")
+    path_object.joint_angles = Your_IK(0.25, 0.15, 0.025)
+    path_object.go_to_joint_state()
+
+    EefState = 1  # Turn magnet on
+    pub_EefState.publish(Bool(EefState))
+    rospy.sleep(0.2)  # Wait for magnet to activate
+    # For visualization only
+    try:
+        path_object.attach_mesh("C", "link5")
+        print("Mesh C attached to end effector")
+    except Exception as e:
+        print(f"Note: Visualization failed but continuing: {e}")
+
+    path_object.joint_angles = Your_IK(0.25, -0.15, 0.075)
+    path_object.go_to_joint_state()
+
+    EefState = 0  # Turn magnet off
+    pub_EefState.publish(Bool(EefState))
+    rospy.sleep(0.2)  # Wait for magnet to deactivate
+    # For visualization only
+    try:
+        path_object.detach_mesh("C", "link5")
+    except Exception as e:
+        print(f"Note: Visualization failed but continuing: {e}")
+def case_3(path_object):
+    # 2-1
+    print("Step 1: Moving C")
+    path_object.joint_angles = Your_IK(0.25, 0.0, 0.06)
+    path_object.go_to_joint_state()
+
+    EefState = 1  # Turn magnet on
+    pub_EefState.publish(Bool(EefState))
+    rospy.sleep(0.5)  # Wait for magnet to activate
+    # For visualization only
+    try:
+        path_object.attach_mesh("C", "link5")
+        print("Mesh C attached to end effector")
+    except Exception as e:
+        print(f"Note: Visualization failed but continuing: {e}")
+
+    path_object.joint_angles = Your_IK(0.25, 0.15, 0.025)
+    path_object.go_to_joint_state()
+
+    EefState = 0  # Turn magnet off
+    pub_EefState.publish(Bool(EefState))
+    rospy.sleep(0.2)  # Wait for magnet to deactivate
+    # For visualization only
+    try:
+        path_object.detach_mesh("C", "link5")
+    except Exception as e:
+        print(f"Note: Visualization failed but continuing: {e}")
+
+    print("Step 2: Moving B")
+    path_object.joint_angles = Your_IK(0.25, 0.0, 0.04)
+    path_object.go_to_joint_state()
+
+    EefState = 1  # Turn magnet on
+    pub_EefState.publish(Bool(EefState))
+    rospy.sleep(0.2)  # Wait for magnet to activate
+    # For visualization only
+    try:
+        path_object.attach_mesh("B", "link5")
+        print("Mesh B attached to end effector")
+    except Exception as e:
+        print(f"Note: Visualization failed but continuing: {e}")
+
+    path_object.joint_angles = Your_IK(0.25, -0.15, 0.025)
+    path_object.go_to_joint_state()
+
+    EefState = 0  # Turn magnet off
+    pub_EefState.publish(Bool(EefState))
+    rospy.sleep(0.2)  # Wait for magnet to deactivate
+    # For visualization only
+    try:
+        path_object.detach_mesh("B", "link5")
+    except Exception as e:
+        print(f"Note: Visualization failed but continuing: {e}")
+    
+    print("Step 3: Moving C")
+    path_object.joint_angles = Your_IK(0.25, 0.15, 0.025)
+    path_object.go_to_joint_state()
+
+    EefState = 1  # Turn magnet on
+    pub_EefState.publish(Bool(EefState))
+    rospy.sleep(0.2)  # Wait for magnet to activate
+    # For visualization only
+    try:
+        path_object.attach_mesh("C", "link5")
+        print("Mesh C attached to end effector")
+    except Exception as e:
+        print(f"Note: Visualization failed but continuing: {e}")
+
+    path_object.joint_angles = Your_IK(0.25, -0.15, 0.05)
+    path_object.go_to_joint_state()
+
+    EefState = 0  # Turn magnet off
+    pub_EefState.publish(Bool(EefState))
+    rospy.sleep(0.2)  # Wait for magnet to deactivate
+    # For visualization only
+    try:
+        path_object.detach_mesh("C", "link5")
+    except Exception as e:
+        print(f"Note: Visualization failed but continuing: {e}")
+
+    print("Step 4: Moving A")
+    path_object.joint_angles = Your_IK(0.25, 0.0, 0.025)
+    path_object.go_to_joint_state()
+
+    EefState = 1  # Turn magnet on
+    pub_EefState.publish(Bool(EefState))
+    rospy.sleep(0.2)  # Wait for magnet to activate
+    # For visualization only
+    try:
+        path_object.attach_mesh("A", "link5")
+        print("Mesh A attached to end effector")
+    except Exception as e:
+        print(f"Note: Visualization failed but continuing: {e}")
+
+    path_object.joint_angles = Your_IK(0.25, 0.15, 0.025)
+    path_object.go_to_joint_state()
+
+    EefState = 0  # Turn magnet off
+    pub_EefState.publish(Bool(EefState))
+    rospy.sleep(0.2)  # Wait for magnet to deactivate
+    # For visualization only
+    try:
+        path_object.detach_mesh("A", "link5")
+    except Exception as e:
+        print(f"Note: Visualization failed but continuing: {e}")
+
+    print("Step 5: Moving C")
+    path_object.joint_angles = Your_IK(0.25, -0.15, 0.05)
+    path_object.go_to_joint_state()
+
+    EefState = 1  # Turn magnet on
+    pub_EefState.publish(Bool(EefState))
+    rospy.sleep(0.2)  # Wait for magnet to activate
+    # For visualization only
+    try:
+        path_object.attach_mesh("C", "link5")
+        print("Mesh C attached to end effector")
+    except Exception as e:
+        print(f"Note: Visualization failed but continuing: {e}")
+
+    path_object.joint_angles = Your_IK(0.25, 0.0, 0.025)
+    path_object.go_to_joint_state()
+
+    EefState = 0  # Turn magnet off
+    pub_EefState.publish(Bool(EefState))
+    rospy.sleep(0.2)  # Wait for magnet to deactivate
+    # For visualization only
+    try:
+        path_object.detach_mesh("C", "link5")
+    except Exception as e:
+        print(f"Note: Visualization failed but continuing: {e}")    
+
+    print("Step 6: Moving B")
+    path_object.joint_angles = Your_IK(0.25, -0.15, 0.025)
+    path_object.go_to_joint_state()
+
+    EefState = 1  # Turn magnet on
+    pub_EefState.publish(Bool(EefState))
+    rospy.sleep(0.2)  # Wait for magnet to activate
+    # For visualization only
+    try:
+        path_object.attach_mesh("B", "link5")
+        print("Mesh B attached to end effector")
+    except Exception as e:
+        print(f"Note: Visualization failed but continuing: {e}")
+
+    path_object.joint_angles = Your_IK(0.25, 0.15, 0.05)
+    path_object.go_to_joint_state()
+
+    EefState = 0  # Turn magnet off
+    pub_EefState.publish(Bool(EefState))
+    rospy.sleep(0.2)  # Wait for magnet to deactivate
+    # For visualization only
+    try:
+        path_object.detach_mesh("B", "link5")
+    except Exception as e:
+        print(f"Note: Visualization failed but continuing: {e}")
+    print("Step 7: Moving C")
+    path_object.joint_angles = Your_IK(0.25, 0.0, 0.025)
+    path_object.go_to_joint_state()
+
+    EefState = 1  # Turn magnet on
+    pub_EefState.publish(Bool(EefState))
+    rospy.sleep(0.2)  # Wait for magnet to activate
+    # For visualization only
+    try:
+        path_object.attach_mesh("C", "link5")
+        print("Mesh C attached to end effector")
+    except Exception as e:
+        print(f"Note: Visualization failed but continuing: {e}")
+
+    path_object.joint_angles = Your_IK(0.25, 0.15, 0.075)
+    path_object.go_to_joint_state()
+
+    EefState = 0  # Turn magnet off
+    pub_EefState.publish(Bool(EefState))
+    rospy.sleep(0.2)  # Wait for magnet to deactivate
+    # For visualization only
+    try:
+        path_object.detach_mesh("C", "link5")
+    except Exception as e:
+        print(f"Note: Visualization failed but continuing: {e}")
+
+def case_4(path_object):
+    # 2-3
+    print("Step 1: Moving C")
+    path_object.joint_angles = Your_IK(0.25, 0.0, 0.06)
+    path_object.go_to_joint_state()
+
+    EefState = 1  # Turn magnet on
+    pub_EefState.publish(Bool(EefState))
+    rospy.sleep(0.5)  # Wait for magnet to activate
+    # For visualization only
+    try:
+        path_object.attach_mesh("C", "link5")
+        print("Mesh C attached to end effector")
+    except Exception as e:
+        print(f"Note: Visualization failed but continuing: {e}")
+    
+    path_object.joint_angles = Your_IK(0.25, -0.15, 0.025)
+    path_object.go_to_joint_state()
+
+    EefState = 0  # Turn magnet off
+    pub_EefState.publish(Bool(EefState))
+    rospy.sleep(0.2)  # Wait for magnet to deactivate
+    # For visualization only
+    try:
+        path_object.detach_mesh("C", "link5")
+    except Exception as e:
+        print(f"Note: Visualization failed but continuing: {e}")
+
+    print("Step 2: Moving B")
+    path_object.joint_angles = Your_IK(0.25, 0.0, 0.04)
+    path_object.go_to_joint_state()
+
+    EefState = 1  # Turn magnet on
+    pub_EefState.publish(Bool(EefState))
+    rospy.sleep(0.2)  # Wait for magnet to activate
+    # For visualization only
+    try:
+        path_object.attach_mesh("B", "link5")
+        print("Mesh B attached to end effector")
+    except Exception as e:
+        print(f"Note: Visualization failed but continuing: {e}")
+    
+    path_object.joint_angles = Your_IK(0.25, 0.15, 0.025)
+    path_object.go_to_joint_state()
+
+    EefState = 0  # Turn magnet off
+    pub_EefState.publish(Bool(EefState))
+    rospy.sleep(0.2)  # Wait for magnet to deactivate
+    # For visualization only
+    try:
+        path_object.detach_mesh("B", "link5")
+    except Exception as e:
+        print(f"Note: Visualization failed but continuing: {e}")
+    
+    print("Step 3: Moving C")
+    path_object.joint_angles = Your_IK(0.25, -0.15, 0.025)
+    path_object.go_to_joint_state()
+
+    EefState = 1  # Turn magnet on
+    pub_EefState.publish(Bool(EefState))
+    rospy.sleep(0.2)  # Wait for magnet to activate
+    # For visualization only
+    try:
+        path_object.attach_mesh("C", "link5")
+        print("Mesh C attached to end effector")
+    except Exception as e:
+        print(f"Note: Visualization failed but continuing: {e}")
+    
+    path_object.joint_angles = Your_IK(0.25, 0.15, 0.05)
+    path_object.go_to_joint_state()
+
+    EefState = 0  # Turn magnet off
+    pub_EefState.publish(Bool(EefState))
+    rospy.sleep(0.2)  # Wait for magnet to deactivate
+    # For visualization only
+    try:
+        path_object.detach_mesh("C", "link5")
+    except Exception as e:
+        print(f"Note: Visualization failed but continuing: {e}")
+
+    print("Step 4: Moving A")
+    path_object.joint_angles = Your_IK(0.25, 0.0, 0.025)
+    path_object.go_to_joint_state()
+
+    EefState = 1  # Turn magnet on
+    pub_EefState.publish(Bool(EefState))
+    rospy.sleep(0.2)  # Wait for magnet to activate
+    # For visualization only
+    try:
+        path_object.attach_mesh("A", "link5")
+        print("Mesh A attached to end effector")
+    except Exception as e:
+        print(f"Note: Visualization failed but continuing: {e}")
+    
+    path_object.joint_angles = Your_IK(0.25, -0.15, 0.025)
+    path_object.go_to_joint_state()
+
+    EefState = 0  # Turn magnet off
+    pub_EefState.publish(Bool(EefState))
+    rospy.sleep(0.2)  # Wait for magnet to deactivate
+    # For visualization only
+    try:
+        path_object.detach_mesh("A", "link5")
+    except Exception as e:
+        print(f"Note: Visualization failed but continuing: {e}")
+    
+    print("Step 5: Moving C")
+    path_object.joint_angles = Your_IK(0.25, 0.15, 0.05)
+    path_object.go_to_joint_state()
+
+    EefState = 1  # Turn magnet on
+    pub_EefState.publish(Bool(EefState))
+    rospy.sleep(0.2)  # Wait for magnet to activate
+    # For visualization only
+    try:
+        path_object.attach_mesh("C", "link5")
+        print("Mesh C attached to end effector")
+    except Exception as e:
+        print(f"Note: Visualization failed but continuing: {e}")
+    
+    path_object.joint_angles = Your_IK(0.25, 0.0, 0.025)
+    path_object.go_to_joint_state()
+
+    EefState = 0  # Turn magnet off
+    pub_EefState.publish(Bool(EefState))
+    rospy.sleep(0.2)  # Wait for magnet to deactivate
+    # For visualization only
+    try:
+        path_object.detach_mesh("C", "link5")
+    except Exception as e:
+        print(f"Note: Visualization failed but continuing: {e}")
+
+    print("Step 6: Moving B")
+    path_object.joint_angles = Your_IK(0.25, 0.15, 0.025)
+    path_object.go_to_joint_state()
+
+    EefState = 1  # Turn magnet on
+    pub_EefState.publish(Bool(EefState))
+    rospy.sleep(0.2)  # Wait for magnet to activate
+    # For visualization only
+    try:
+        path_object.attach_mesh("B", "link5")
+        print("Mesh B attached to end effector")
+    except Exception as e:
+        print(f"Note: Visualization failed but continuing: {e}")
+    
+    path_object.joint_angles = Your_IK(0.25, -0.15, 0.05)
+    path_object.go_to_joint_state()
+
+    EefState = 0  # Turn magnet off
+    pub_EefState.publish(Bool(EefState))
+    rospy.sleep(0.2)  # Wait for magnet to deactivate
+    # For visualization only
+    try:
+        path_object.detach_mesh("B", "link5")
+    except Exception as e:
+        print(f"Note: Visualization failed but continuing: {e}")
+    
+    print("Step 7: Moving C")
+    path_object.joint_angles = Your_IK(0.25, 0.0, 0.025)
+    path_object.go_to_joint_state()
+
+    EefState = 1  # Turn magnet on
+    pub_EefState.publish(Bool(EefState))
+    rospy.sleep(0.2)  # Wait for magnet to activate
+    # For visualization only
+    try:
+        path_object.attach_mesh("C", "link5")
+        print("Mesh C attached to end effector")
+    except Exception as e:
+        print(f"Note: Visualization failed but continuing: {e}")
+    
+    path_object.joint_angles = Your_IK(0.25, -0.15, 0.075)
+    path_object.go_to_joint_state()
+
+    EefState = 0  # Turn magnet off
+    pub_EefState.publish(Bool(EefState))
+    rospy.sleep(0.2)  # Wait for magnet to deactivate
+    # For visualization only
+    try:
+        path_object.detach_mesh("C", "link5")
+    except Exception as e:
+        print(f"Note: Visualization failed but continuing: {e}")
+
+def case_5(path_object):
+    # 3-1
+    print("Step 1: Moving C")
+    path_object.joint_angles = Your_IK(0.25, -0.15, 0.06)
+    path_object.go_to_joint_state()
+
+    EefState = 1  # Turn magnet on
+    pub_EefState.publish(Bool(EefState))
+    rospy.sleep(0.5)  # Wait for magnet to activate
+    # For visualization only
+    try:
+        path_object.attach_mesh("C", "link5")
+        print("Mesh C attached to end effector")
+    except Exception as e:
+        print(f"Note: Visualization failed but continuing: {e}")
+
+    path_object.joint_angles = Your_IK(0.25, 0.15, 0.025)
+    path_object.go_to_joint_state()
+
+    EefState = 0  # Turn magnet off
+    pub_EefState.publish(Bool(EefState))
+    rospy.sleep(0.2)  # Wait for magnet to deactivate
+    # For visualization only
+    try:
+        path_object.detach_mesh("C", "link5")
+    except Exception as e:
+        print(f"Note: Visualization failed but continuing: {e}")
+
+    print("Step 2: Moving B")
+    path_object.joint_angles = Your_IK(0.25, -0.15, 0.04)
+    path_object.go_to_joint_state()
+
+    EefState = 1  # Turn magnet on
+    pub_EefState.publish(Bool(EefState))
+    rospy.sleep(0.2)  # Wait for magnet to activate
+    # For visualization only
+    try:
+        path_object.attach_mesh("B", "link5")
+        print("Mesh B attached to end effector")
+    except Exception as e:
+        print(f"Note: Visualization failed but continuing: {e}")
+
+    path_object.joint_angles = Your_IK(0.25, 0.0, 0.025)
+    path_object.go_to_joint_state()
+
+    EefState = 0  # Turn magnet off
+    pub_EefState.publish(Bool(EefState))
+    rospy.sleep(0.2)  # Wait for magnet to deactivate
+    # For visualization only
+    try:
+        path_object.detach_mesh("B", "link5")
+    except Exception as e:
+        print(f"Note: Visualization failed but continuing: {e}")
+
+    print("Step 3: Moving C")
+    path_object.joint_angles = Your_IK(0.25, 0.15, 0.025)
+    path_object.go_to_joint_state()
+
+    EefState = 1  # Turn magnet on
+    pub_EefState.publish(Bool(EefState))
+    rospy.sleep(0.2)  # Wait for magnet to activate
+    # For visualization only
+    try:
+        path_object.attach_mesh("C", "link5")
+        print("Mesh C attached to end effector")
+    except Exception as e:
+        print(f"Note: Visualization failed but continuing: {e}")
+
+    path_object.joint_angles = Your_IK(0.25, 0.0, 0.05)
+    path_object.go_to_joint_state()
+
+    EefState = 0  # Turn magnet off
+    pub_EefState.publish(Bool(EefState))
+    rospy.sleep(0.2)  # Wait for magnet to deactivate
+    # For visualization only
+    try:
+        path_object.detach_mesh("C", "link5")
+    except Exception as e:
+        print(f"Note: Visualization failed but continuing: {e}")
+    
+    print("Step 4: Moving A")
+    path_object.joint_angles = Your_IK(0.25, -0.15, 0.025)
+    path_object.go_to_joint_state()
+
+    EefState = 1  # Turn magnet on
+    pub_EefState.publish(Bool(EefState))
+    rospy.sleep(0.2)  # Wait for magnet to activate
+    # For visualization only
+    try:
+        path_object.attach_mesh("A", "link5")
+        print("Mesh A attached to end effector")
+    except Exception as e:
+        print(f"Note: Visualization failed but continuing: {e}")
+
+    path_object.joint_angles = Your_IK(0.25, 0.15, 0.025)
+    path_object.go_to_joint_state()
+
+    EefState = 0  # Turn magnet off
+    pub_EefState.publish(Bool(EefState))
+    rospy.sleep(0.2)  # Wait for magnet to deactivate
+    # For visualization only
+    try:
+        path_object.detach_mesh("A", "link5")
+    except Exception as e:
+        print(f"Note: Visualization failed but continuing: {e}")
+    
+    print("Step 5: Moving C")
+    path_object.joint_angles = Your_IK(0.25, 0.0, 0.05)
+    path_object.go_to_joint_state()
+
+    EefState = 1  # Turn magnet on
+    pub_EefState.publish(Bool(EefState))
+    rospy.sleep(0.2)  # Wait for magnet to activate
+    # For visualization only
+    try:
+        path_object.attach_mesh("C", "link5")
+        print("Mesh C attached to end effector")
+    except Exception as e:
+        print(f"Note: Visualization failed but continuing: {e}")
+
+    path_object.joint_angles = Your_IK(0.25, -0.15, 0.025)
+    path_object.go_to_joint_state()
+
+    EefState = 0  # Turn magnet off
+    pub_EefState.publish(Bool(EefState))
+    rospy.sleep(0.2)  # Wait for magnet to deactivate
+    # For visualization only
+    try:
+        path_object.detach_mesh("C", "link5")
+    except Exception as e:
+        print(f"Note: Visualization failed but continuing: {e}")
+
+    print("Step 6: Moving B")
+    path_object.joint_angles = Your_IK(0.25, 0.0, 0.025)
+    path_object.go_to_joint_state()
+
+    EefState = 1  # Turn magnet on
+    pub_EefState.publish(Bool(EefState))
+    rospy.sleep(0.2)  # Wait for magnet to activate
+    # For visualization only
+    try:
+        path_object.attach_mesh("B", "link5")
+        print("Mesh B attached to end effector")
+    except Exception as e:
+        print(f"Note: Visualization failed but continuing: {e}")
+
+    path_object.joint_angles = Your_IK(0.25, 0.15, 0.05)
+    path_object.go_to_joint_state()
+
+    EefState = 0  # Turn magnet off
+    pub_EefState.publish(Bool(EefState))
+    rospy.sleep(0.2)  # Wait for magnet to deactivate
+    # For visualization only
+    try:
+        path_object.detach_mesh("B", "link5")
+    except Exception as e:
+        print(f"Note: Visualization failed but continuing: {e}")
+    
+    print("Step 7: Moving C")
+    path_object.joint_angles = Your_IK(0.25, -0.15, 0.025)
+    path_object.go_to_joint_state()
+
+    EefState = 1  # Turn magnet on
+    pub_EefState.publish(Bool(EefState))
+    rospy.sleep(0.2)  # Wait for magnet to activate
+    # For visualization only
+    try:
+        path_object.attach_mesh("C", "link5")
+        print("Mesh C attached to end effector")
+    except Exception as e:
+        print(f"Note: Visualization failed but continuing: {e}")
+
+    path_object.joint_angles = Your_IK(0.25, 0.15, 0.075)
+    path_object.go_to_joint_state()
+
+    EefState = 0  # Turn magnet off
+    pub_EefState.publish(Bool(EefState))
+    rospy.sleep(0.2)  # Wait for magnet to deactivate
+    # For visualization only
+    try:
+        path_object.detach_mesh("C", "link5")
+    except Exception as e:
+        print(f"Note: Visualization failed but continuing: {e}")
+
+def case_6(path_object):
+    # 3-2
+    print("Step 1: Moving C")
+    path_object.joint_angles = Your_IK(0.25, -0.15, 0.06)
+    path_object.go_to_joint_state()
+
+    EefState = 1  # Turn magnet on
+    pub_EefState.publish(Bool(EefState))
+    rospy.sleep(0.5)  # Wait for magnet to activate
+    # For visualization only
+    try:
+        path_object.attach_mesh("C", "link5")
+        print("Mesh C attached to end effector")
+    except Exception as e:
+        print(f"Note: Visualization failed but continuing: {e}")
+
+    path_object.joint_angles = Your_IK(0.25, 0, 0.025)
+    path_object.go_to_joint_state()
+
+    EefState = 0  # Turn magnet off
+    pub_EefState.publish(Bool(EefState))
+    rospy.sleep(0.2)  # Wait for magnet to deactivate
+    # For visualization only
+    try:
+        path_object.detach_mesh("C", "link5")
+    except Exception as e:
+        print(f"Note: Visualization failed but continuing: {e}")
+    
+    print("Step 2: Moving B")
+    path_object.joint_angles = Your_IK(0.25, -0.15, 0.04)
+    path_object.go_to_joint_state()
+
+    EefState = 1  # Turn magnet on
+    pub_EefState.publish(Bool(EefState))
+    rospy.sleep(0.2)  # Wait for magnet to activate
+    # For visualization only
+    try:
+        path_object.attach_mesh("B", "link5")
+        print("Mesh B attached to end effector")
+    except Exception as e:
+        print(f"Note: Visualization failed but continuing: {e}")
+
+    path_object.joint_angles = Your_IK(0.25, 0.15, 0.025)
+    path_object.go_to_joint_state()
+
+    EefState = 0  # Turn magnet off
+    pub_EefState.publish(Bool(EefState))
+    rospy.sleep(0.2)  # Wait for magnet to deactivate
+    # For visualization only
+    try:
+        path_object.detach_mesh("B", "link5")
+    except Exception as e:
+        print(f"Note: Visualization failed but continuing: {e}")
+
+    print("Step 3: Moving C")
+    path_object.joint_angles = Your_IK(0.25, 0, 0.025)
+    path_object.go_to_joint_state()
+
+    EefState = 1  # Turn magnet on
+    pub_EefState.publish(Bool(EefState))
+    rospy.sleep(0.2)  # Wait for magnet to activate
+    # For visualization only
+    try:
+        path_object.attach_mesh("C", "link5")
+        print("Mesh C attached to end effector")
+    except Exception as e:
+        print(f"Note: Visualization failed but continuing: {e}")
+
+    path_object.joint_angles = Your_IK(0.25, 0.15, 0.05)
+    path_object.go_to_joint_state()
+
+    EefState = 0  # Turn magnet off
+    pub_EefState.publish(Bool(EefState))
+    rospy.sleep(0.2)  # Wait for magnet to deactivate
+    # For visualization only
+    try:
+        path_object.detach_mesh("C", "link5")
+    except Exception as e:
+        print(f"Note: Visualization failed but continuing: {e}")
+    print("Step 4: Moving A")
+    path_object.joint_angles = Your_IK(0.25, -0.15, 0.025)
+    path_object.go_to_joint_state()
+
+    EefState = 1  # Turn magnet on
+    pub_EefState.publish(Bool(EefState))
+    rospy.sleep(0.2)  # Wait for magnet to activate
+    # For visualization only
+    try:
+        path_object.attach_mesh("A", "link5")
+        print("Mesh A attached to end effector")
+    except Exception as e:
+        print(f"Note: Visualization failed but continuing: {e}")
+
+    path_object.joint_angles = Your_IK(0.25, 0, 0.025)
+    path_object.go_to_joint_state()
+
+    EefState = 0  # Turn magnet off
+    pub_EefState.publish(Bool(EefState))
+    rospy.sleep(0.2)  # Wait for magnet to deactivate
+    # For visualization only
+    try:
+        path_object.detach_mesh("A", "link5")
+    except Exception as e:
+        print(f"Note: Visualization failed but continuing: {e}")
+    print("Step 5: Moving C")
+    path_object.joint_angles = Your_IK(0.25, 0.15, 0.05)
+    path_object.go_to_joint_state()
+
+    EefState = 1  # Turn magnet on
+    pub_EefState.publish(Bool(EefState))
+    rospy.sleep(0.2)  # Wait for magnet to activate
+    # For visualization only
+    try:
+        path_object.attach_mesh("C", "link5")
+        print("Mesh C attached to end effector")
+    except Exception as e:
+        print(f"Note: Visualization failed but continuing: {e}")
+
+    path_object.joint_angles = Your_IK(0.25, -0.15, 0.025)
+    path_object.go_to_joint_state()
+
+    EefState = 0  # Turn magnet off
+    pub_EefState.publish(Bool(EefState))
+    rospy.sleep(0.2)  # Wait for magnet to deactivate
+    # For visualization only
+    try:
+        path_object.detach_mesh("C", "link5")
+    except Exception as e:
+        print(f"Note: Visualization failed but continuing: {e}")
+    print("Step 6: Moving B")
+    path_object.joint_angles = Your_IK(0.25, 0.15, 0.025)
+    path_object.go_to_joint_state()
+
+    EefState = 1  # Turn magnet on
+    pub_EefState.publish(Bool(EefState))
+    rospy.sleep(0.2)  # Wait for magnet to activate
+    # For visualization only
+    try:
+        path_object.attach_mesh("B", "link5")
+        print("Mesh B attached to end effector")
+    except Exception as e:
+        print(f"Note: Visualization failed but continuing: {e}")
+
+    path_object.joint_angles = Your_IK(0.25, 0, 0.05)
+    path_object.go_to_joint_state()
+
+    EefState = 0  # Turn magnet off
+    pub_EefState.publish(Bool(EefState))
+    rospy.sleep(0.2)  # Wait for magnet to deactivate
+    # For visualization only
+    try:
+        path_object.detach_mesh("B", "link5")
+    except Exception as e:
+        print(f"Note: Visualization failed but continuing: {e}")
+    
+    print("Step 7: Moving C")
+    path_object.joint_angles = Your_IK(0.25, -0.15, 0.025)
+    path_object.go_to_joint_state()
+
+    EefState = 1  # Turn magnet on
+    pub_EefState.publish(Bool(EefState))
+    rospy.sleep(0.2)  # Wait for magnet to activate
+    # For visualization only
+    try:
+        path_object.attach_mesh("C", "link5")
+        print("Mesh C attached to end effector")
+    except Exception as e:
+        print(f"Note: Visualization failed but continuing: {e}")
+
+    path_object.joint_angles = Your_IK(0.25, 0, 0.075)
+    path_object.go_to_joint_state()
+
+    EefState = 0  # Turn magnet off
+    pub_EefState.publish(Bool(EefState))
+    rospy.sleep(0.2)  # Wait for magnet to deactivate
+    # For visualization only
+    try:
+        path_object.detach_mesh("C", "link5")
+    except Exception as e:
+        print(f"Note: Visualization failed but continuing: {e}")
+        
 def main():
     global pub_EefState, EefState, global_path_object
     
@@ -687,10 +1871,11 @@ def main():
         pub_EefState_to_arm()
 
         # Initialize voice command subscriber
-        rospy.Subscriber('/voice_case_cmd', String, voice_callback)
+        # rospy.Subscriber('/voice_case_cmd', String, voice_callback)
 
         print("  m: Manual control")
         print("  q: Quit")
+        end_pos = input(print("input end pos"))
         
         def wait_for_voice_or_keyboard():
             """Wait for either voice command or keyboard input"""
@@ -711,9 +1896,21 @@ def main():
             vo = vision_order[::-1]
             print(f"📷 Vision 辨識順序為: {vo}")
         spawn_hanoi_towers(path_object,vo)
+        index_of_1 = vo.index(1)
+
+        if index_of_1 == 0:
+            tower_stacks[-0.15] = ['A', 'B', 'C']
+        elif index_of_1 == 1:
+            tower_stacks[0.0] = ['A', 'B', 'C']
+        elif index_of_1 == 2:
+            tower_stacks[0.15] = ['A', 'B', 'C']
+
         print("solve...")
         solve(path_object,vo)
-
+        
+        print("move...")
+        tower_rec(3,index_of_1,end_pos)
+        
     except rospy.ROSInterruptException:
         return
     except KeyboardInterrupt:
